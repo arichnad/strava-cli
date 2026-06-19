@@ -5,42 +5,12 @@ import cache
 import logging
 
 
-#unused
-class ApiRepository:
-
-    page_size = 100
-
-    def __init__(self, token, sleep = None):
-        self._client = api.Client(token, sleep)
-
-    def get_activities(self):
-        all_activities = []
-        page = 1
-        while True:
-            activities = self._client.get_activities_page(
-                page, ApiRepository.page_size)
-            all_activities.extend(activities)
-            num = len(activities)
-            if num < ApiRepository.page_size or num == 0:
-                break
-            page += 1
-        return all_activities
-
-    def get_bikes(self):
-        athlete = self._client.get_athlete()
-        return athlete["bikes"]
-
-    def get_shoes(self):
-        athlete = self._client.get_athlete()
-        return athlete["shoes"]
-
-    def update_activity(self, id, data):
-        self._client.update_activity(id, **data)
-
-
 class CachedRepository:
 
     page_size = 100
+
+    # duplicate heartrate value allowed
+    max_heartrate_duplication = 30
 
     def __init__(self, token, cache, update_cache = True, sleep = None):
         self._client = api.Client(token, sleep)
@@ -143,6 +113,22 @@ class CachedRepository:
         if 'latlng' not in stream_types:
             raise ValueError('cannot get gps track for an activity without locations')
         streams = [{stream_type: streams[stream_type]['data'][index] for stream_type in stream_types} for index in range(length)]
+        
+        return CachedRepository.remove_bad_data(activity, stream_types, streams)
+
+    @staticmethod
+    def remove_bad_data(activity, stream_types, streams):
+        # heartrate values sometimes are wrong, check max_heartrate_duplication
+        last_heartrate, last_heartrate_count = None, 1
+        for entry in streams:
+            value = entry['heartrate'] if 'heartrate' in entry else None
+            if value != last_heartrate:
+                last_heartrate, last_heartrate_count = value, 1
+                continue
+
+            last_heartrate_count += 1
+            if last_heartrate_count > CachedRepository.max_heartrate_duplication:
+                del entry['heartrate']
         
         return activity, stream_types, streams
 
